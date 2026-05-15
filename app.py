@@ -4,12 +4,39 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from itertools import product
 import io
+import requests
+from matplotlib import font_manager
 
-# ===================== 全局配置 =====================
-plt.rcParams['font.sans-serif'] = ['SimHei']
-plt.rcParams['axes.unicode_minus'] = False
+
+# ===================== 全局配置：修复云端中文乱码（核心修改） =====================
+# 自动下载Google开源中文字体Noto Sans SC（完全免费，云端可用）
+@st.cache_resource
+def load_chinese_font():
+    # 下载中文字体文件
+    font_url = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/SimplifiedChinese/NotoSansSC-Regular.otf"
+    font_path = "NotoSansSC-Regular.otf"
+
+    try:
+        # 下载字体
+        response = requests.get(font_url, timeout=10)
+        with open(font_path, "wb") as f:
+            f.write(response.content)
+
+        # 注册字体
+        font_manager.fontManager.addfont(font_path)
+        plt.rcParams['font.sans-serif'] = ['Noto Sans SC']
+        plt.rcParams['axes.unicode_minus'] = False
+        return True
+    except Exception as e:
+        st.warning(f"中文字体加载失败，部分文字可能显示异常：{e}")
+        return False
+
+
+# 加载中文字体
+load_chinese_font()
+
 st.set_page_config(
-    page_title="不锈钢性能计算工具",
+    page_title="不锈钢成分产品地图工具",
     page_icon="🔬",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -279,7 +306,7 @@ def composition_sensitivity_analysis(base_composition, composition_ranges, tempe
 
 # ===================== 主界面 =====================
 def main():
-    st.title("🔬 不锈钢产品地图工具")
+    st.title("🔬 不锈钢成分产品地图工具")
     st.markdown("---")
 
     # 侧边栏：参数配置
@@ -478,3 +505,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# Terminal streamlit run "产品地图性能计算v4.0.py"
