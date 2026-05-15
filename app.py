@@ -6,19 +6,43 @@ from itertools import product
 import io
 import requests
 from matplotlib import font_manager
+import os
 
 
-# ===================== 全局配置：修复云端中文乱码（核心修改） =====================
-# 自动下载Google开源中文字体Noto Sans SC（完全免费，云端可用）
+# ===================== 全局配置：终极云端中文乱码修复方案 =====================
 @st.cache_resource
 def load_chinese_font():
-    # 下载中文字体文件
-    font_url = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/SimplifiedChinese/NotoSansSC-Regular.otf"
-    font_path = "NotoSansSC-Regular.otf"
+    """
+    多字体 fallback 机制：
+    1. 先尝试使用系统自带的中文字体
+    2. 找不到则下载兼容性最好的TTF格式Noto Sans SC字体
+    3. 所有失败则自动切换为英文标签模式
+    """
+    # 优先尝试系统自带的中文字体（本地Windows环境）
+    system_fonts = [
+        "SimHei", "Microsoft YaHei", "WenQuanYi Micro Hei",
+        "Noto Sans CJK SC", "Source Han Sans SC"
+    ]
 
+    for font in system_fonts:
+        try:
+            plt.rcParams['font.sans-serif'] = [font]
+            plt.rcParams['axes.unicode_minus'] = False
+            # 测试字体是否可用
+            fig, ax = plt.subplots()
+            ax.text(0.5, 0.5, "测试中文", fontsize=12)
+            plt.close(fig)
+            return True, font
+        except:
+            continue
+
+    # 系统字体不可用，下载TTF格式的Noto Sans SC（兼容性最好）
     try:
+        font_url = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/TTF/SimplifiedChinese/NotoSansSC-Regular.ttf"
+        font_path = "NotoSansSC-Regular.ttf"
+
         # 下载字体
-        response = requests.get(font_url, timeout=10)
+        response = requests.get(font_url, timeout=15)
         with open(font_path, "wb") as f:
             f.write(response.content)
 
@@ -26,14 +50,46 @@ def load_chinese_font():
         font_manager.fontManager.addfont(font_path)
         plt.rcParams['font.sans-serif'] = ['Noto Sans SC']
         plt.rcParams['axes.unicode_minus'] = False
-        return True
+        return True, "Noto Sans SC"
     except Exception as e:
-        st.warning(f"中文字体加载失败，部分文字可能显示异常：{e}")
-        return False
+        st.warning(f"中文字体加载失败，将自动切换为英文标签模式：{e}")
+        # 切换为英文标签模式
+        plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+        plt.rcParams['axes.unicode_minus'] = False
+        return False, "DejaVu Sans"
 
 
-# 加载中文字体
-load_chinese_font()
+# 加载字体
+font_loaded, current_font = load_chinese_font()
+
+# 中英文标签映射（字体加载失败时自动使用英文）
+label_map = {
+    "点蚀当量PREN": "PREN",
+    "Md30温度(℃)": "Md30 (℃)",
+    "屈服强度(MPa)": "Yield Strength (MPa)",
+    "抗拉强度(MPa)": "Tensile Strength (MPa)",
+    "延伸率(%)": "Elongation (%)",
+    "维氏硬度(HV)": "Vickers Hardness (HV)",
+    "奥氏体当量(Ni_eq)": "Ni Equivalent",
+    "铁素体当量(Cr_eq)": "Cr Equivalent",
+    "晶间腐蚀敏感性指数(ICS)": "ICS Index",
+    "N溶解度(%)": "N Solubility (%)",
+    "Ms温度(℃)": "Ms Temperature (℃)",
+    "不锈钢成分产品地图": "Stainless Steel Composition Map",
+    "颜色": "Color",
+    "大小": "Size",
+    "符合筛选条件": "Qualified Points",
+    "PREN=30(海水耐点蚀)": "PREN=30 (Seawater Resistant)",
+    "Md30=0℃(室温奥氏体稳定)": "Md30=0℃ (Room Temp Stable)"
+}
+
+
+def get_label(zh_label):
+    """根据字体加载状态自动返回对应语言的标签"""
+    if font_loaded:
+        return zh_label
+    return label_map.get(zh_label, zh_label)
+
 
 st.set_page_config(
     page_title="不锈钢成分产品地图工具",
@@ -199,7 +255,7 @@ def multi_objective_filter(df, filters):
     return filtered_df
 
 
-# ===================== 优化版产品地图可视化函数 =====================
+# ===================== 自适应语言产品地图可视化函数 =====================
 def plot_product_map(df, x_col, y_col, color_col, size_col, highlight_df=None):
     fig, ax = plt.subplots(figsize=(12, 9))
 
@@ -216,23 +272,30 @@ def plot_product_map(df, x_col, y_col, color_col, size_col, highlight_df=None):
     if highlight_df is not None and not highlight_df.empty:
         highlight_sizes = 100 + 500 * (highlight_df[size_col] - size_min) / (size_max - size_min)
         ax.scatter(highlight_df[x_col], highlight_df[y_col], c='red', s=highlight_sizes,
-                   alpha=1.0, edgecolors='black', linewidths=1.5, label='符合筛选条件')
+                   alpha=1.0, edgecolors='black', linewidths=1.5, label=get_label("符合筛选条件"))
         ax.legend(fontsize=12)
 
     # 添加颜色条
     cbar = plt.colorbar(scatter, ax=ax)
-    cbar.set_label(color_col, fontsize=14)
+    cbar.set_label(get_label(color_col), fontsize=14)
     cbar.ax.tick_params(labelsize=12)
 
     # 添加参考线
     if x_col == "点蚀当量PREN":
-        ax.axvline(x=30, color='red', linestyle='--', linewidth=2, label='PREN=30(海水耐点蚀)')
+        ax.axvline(x=30, color='red', linestyle='--', linewidth=2, label=get_label("PREN=30(海水耐点蚀)"))
     if y_col == "Md30温度(℃)":
-        ax.axhline(y=0, color='black', linestyle='--', linewidth=2, label='Md30=0℃(室温奥氏体稳定)')
+        ax.axhline(y=0, color='black', linestyle='--', linewidth=2, label=get_label("Md30=0℃(室温奥氏体稳定)"))
 
-    ax.set_xlabel(x_col, fontsize=14)
-    ax.set_ylabel(y_col, fontsize=14)
-    ax.set_title(f"不锈钢成分产品地图\n(颜色：{color_col}，大小：{size_col})", fontsize=18, pad=20)
+    ax.set_xlabel(get_label(x_col), fontsize=14)
+    ax.set_ylabel(get_label(y_col), fontsize=14)
+
+    # 自适应标题
+    if font_loaded:
+        title = f"不锈钢成分产品地图\n({get_label('颜色')}：{get_label(color_col)}，{get_label('大小')}：{get_label(size_col)})"
+    else:
+        title = f"Stainless Steel Composition Map\n(Color: {get_label(color_col)}, Size: {get_label(size_col)})"
+
+    ax.set_title(title, fontsize=18, pad=20)
     ax.grid(True, alpha=0.3, linestyle='--')
     ax.tick_params(axis='both', labelsize=12)
     plt.tight_layout()
@@ -308,6 +371,10 @@ def composition_sensitivity_analysis(base_composition, composition_ranges, tempe
 def main():
     st.title("🔬 不锈钢成分产品地图工具")
     st.markdown("---")
+
+    # 显示字体加载状态
+    if not font_loaded:
+        st.info("ℹ️ 云端环境中文字体加载受限，图表已自动切换为英文标签，不影响计算结果")
 
     # 侧边栏：参数配置
     with st.sidebar:
